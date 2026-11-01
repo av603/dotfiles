@@ -5,7 +5,7 @@
 # to reclaim disk space safely.
 #
 # Usage:
-#   sudo system-purge
+#   system-purge  (will automatically prompt for sudo if needed)
 #
 # Description:
 #   1. System & APT: Purges unused packages, cleans apt archives, and trims systemd journal logs.
@@ -17,12 +17,15 @@
 # Subcommand Setup:
 #   1. Make executable: chmod +x system-purge
 #   2. Move to your PATH: sudo mv system-purge /usr/local/bin/ (or ~/.local/bin/)
-#   3. Run natively: sudo system-purge
+#   3. Run natively: system-purge
 
 set -euo pipefail
 
-# Ensure script is run with sudo
-[ "$EUID" -ne 0 ] && { echo "--> Error: Run with sudo: sudo purge-system-caches"; exit 1; }
+# Self-elevate with sudo if not running as root
+if [ "$EUID" -ne 0 ]; then
+    echo "--> Administrative privileges required. Requesting sudo..."
+    exec sudo "$0" "$@"
+fi
 
 # Determine the actual invoking user and their home directory safely
 TARGET_USER="${SUDO_USER:-$USER}"
