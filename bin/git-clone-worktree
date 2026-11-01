@@ -1,0 +1,111 @@
+#!/bin/bash
+# git-worktree-clone
+#
+# Automates cloning a Git repository using a bare clone and initial worktree layout.
+#
+# Usage:
+#   git worktree-clone <repository_url> [<destination_directory>]
+#   OR directly via script:
+#   ./git-worktree-clone <repository_url> [<destination_directory>]
+#
+# Arguments:     
+#   repository_url         The remote Git URL to clone (e.g., git@github.com:user/repo.git)     
+#   destination_directory  Optional. Base directory for the workspace (default: $HOME)     
+#     
+# Description:
+#   Accepts repository URL and destination folder as inline terminal arguments or falls back to interactive prompts.     
+#   Automatically configures upstream tracking for the created worktree branch.     
+#   Safely handles user inputs by stripping trailing slashes and expanding tildes (~).
+#
+# Subcommand Setup:
+#   1. Make executable: chmod +x git-worktree-clone
+#   2. Move to your PATH: mv git-worktree-clone ~/.local/bin/ (or /usr/local/bin/)
+#   3. Run natively: git worktree-clone <repository_url>
+
+set -euo pipefail
+
+IS_INTERACTIVE=true
+if [ $# -ge 1 ]; then
+    IS_INTERACTIVE=false
+fi
+
+REPO_URL="${1:-}"
+DEST_DIR="${2:-$HOME}"
+
+while [ -z "$REPO_URL" ]; do
+    read -r -p "Enter the Git repository URL: " REPO_URL
+    REPO_URL=$(echo "$REPO_URL" | xargs)
+done
+
+if [ "$IS_INTERACTIVE" = true ]; then
+    read -r -p "Enter destination directory [default: $DEST_DIR]: " INPUT_DIR
+    DEST_DIR="${INPUT_DIR:-$DEST_DIR}"
+fi
+
+case "$DEST_DIR" in
+    \~/*) DEST_DIR="${HOME}/${DEST_DIR#\~/}" ;;
+    \~)   DEST_DIR="$HOME" ;;
+esac
+
+DEST_DIR="${DEST_DIR%/}"
+REPO_NAME=$(basename "${REPO_URL%/}" .git)
+TARGET="${DEST_DIR}/${REPO_NAME}"
+
+if [ -d "$TARGET" ]; then
+    echo "--> Error: Target workspace directory already exists at '$TARGET'." >&2
+    exit 1
+fi
+
+# Convert to absolute path to prevent breaks after cd
+mkdir -p "$DEST_DIR"
+TARGET=$(cd "$DEST_DIR" && pwd)/$REPO_NAME
+
+echo "--------------------------------------------------"
+echo " Repo URL:    $REPO_URL"
+echo " Target:      $TARGET"
+echo "--------------------------------------------------"
+
+echo ""
+CONFIRM=""
+while [ -z "$CONFIRM" ]; do
+    read -r -p "Proceed with these settings? (y/n): " CONFIRM
+    case "$CONFIRM" in
+        [Yy]* ) ;;
+        [Nn]* ) echo "Execution cancelled."; exit 0 ;;
+        * ) echo "--> Error: Enter 'y' or 'n'."; CONFIRM="" ;;
+    esac
+done
+
+echo "=> Setting up workspace at: $TARGET"
+mkdir -p "$TARGET"
+cd -- "$TARGET"
+
+echo "=> Cloning bare repository..."
+git clone --bare "$REPO_URL" .bare
+BARE_DIR="$TARGET/.bare"
+
+# Redirect root git commands to bare directory
+echo "gitdir: .bare" > .git
+
+echo "=> Configuring remote tracking..."
+git -C "$BARE_DIR" config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+git -C "$BARE_DIR" fetch origin
+
+echo "=> Detecting default branch..."
+BRANCH=$(git -C "$BARE_DIR" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@refs/remotes/origin/@@') || \
+BRANCH=$(git -C "$BARE_DIR" remote show origin | awk '/HEAD branch/ {print $3}')
+
+if [ -z "$BRANCH" ]; then
+    echo "Error: Could not detect default branch." >&2
+    exit 1
+fi
+echo "=> Detected branch: $BRANCH"
+
+echo "=> Creating worktree..."
+git -C "$BARE_DIR" worktree add "$TARGET/$BRANCH" "$BRANCH"
+
+echo "=> Setting upstream tracking..."
+git -C "$TARGET/$BRANCH" branch --set-upstream-to="origin/$BRANCH" "$BRANCH"
+
+echo "=> Finished! Structure:"
+ls -F
