@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# purge-system-caches
+#
+# Automates deep cleaning of system caches, developer tools, and user temp files
+# to reclaim disk space safely.
+#
+# Usage:
+#   sudo purge-system-caches
+#
+# Description:
+#   1. System & APT: Purges unused packages, cleans apt archives, and trims systemd journal logs.
+#   2. User Files: Clears thumbnail caches and empties the user Trash bin.
+#   3. Flatpaks: Removes unused Flatpak runtimes and applications.
+#   4. Developer Caches: Clears user-level Pip and Poetry caches (safely dropped back to $SUDO_USER).
+#   5. Docker: Prunes unused containers, networks, images, and volumes.
+#
+# Subcommand Setup:
+#   1. Make executable: chmod +x purge-system-caches
+#   2. Move to your PATH: sudo mv purge-system-caches /usr/local/bin/ (or ~/.local/bin/)
+#   3. Run natively: sudo purge-system-caches
+
+set -euo pipefail
+
+# Ensure script is run with sudo
+[ "$EUID" -ne 0 ] && { echo "--> Error: Run with sudo: sudo purge-system-caches"; exit 1; }
+
+# Determine the actual invoking user and their home directory safely
+TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+
+if [ -z "$TARGET_HOME" ] || [ ! -d "$TARGET_HOME" ]; then
+    echo "--> Error: Could not determine home directory for user '$TARGET_USER'." >&2
+    exit 1
+fi
+
+echo "=== System & Developer Cleanup Started ==="
+df -h / /home 2>/dev/null || df -h /
+
+echo -e "\n=== 1. Cleaning System & APT Caches ==="
+apt-get autoremove --purge -y 
+apt-get clean 
+apt-get autoclean
+journalctl --vacuum-size=100M
+
+echo -e "\n=== 2. Cleaning User Caches & Trash ==="
+rm -rf "$TARGET_HOME/.cache/thumbnails/"* 2>/dev/null || true
+rm -rf "$TARGET_HOME/.local/share/Trash/files/"* "$TARGET_HOME/.local/share/Trash/info/"* 2>/dev/null || true
+
+echo -e "\n=== 3. Cleaning Flatpaks ==="
+if command -v flatpak &>/dev/null; then
+    flatpak uninstall --unused -y || true
+else
+    echo "Flatpak not found, skipping."
+fi
+
+echo -e "\n=== 4. Cleaning Developer Caches ==="
+# Executed as target user so user-level caches don't get root permissions
+sudo -u "$TARGET_USER" bash << 'EOF'
+    # Python / Pip cache
+    if command -v pip &>/dev/null; then
+        echo "Clearing pip cache..."
+        pip cache purge 2>/dev/null || true
+    fi
+
+    # Poetry cache (clearing known caches)
+    if command -v poetry &>/dev/null; then
+        echo "Clearing poetry cache..."
+        for cache in pypi _default-cache; do
+            poetry cache clear "$cache" --all -n 2>/dev/null || true
+        done
+    fi
+EOF
+
+# Docker system cleanup (only if daemon is active)
+if command -v docker &>/dev/null && docker info &>/dev/null; then
+    echo -e "\n=== 5. Pruning Docker Resources ==="
+    docker system prune --all --force --volumes
+fi
+
+echo -e "\n=== Cleanup Complete ==="
+df -h / /home 2>/dev/null || df -h /
