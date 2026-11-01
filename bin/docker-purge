@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# docker-purge
+#
+# Wipes all containers and prunes networks by default, with opt-in flags for volumes and images.
+#
+# Usage:
+#   docker-purge           # Stops/removes all containers and prunes networks/dangling images
+#   docker-purge --volumes # Also wipes all Docker volumes
+#   docker-purge --images  # Also wipes all local container images
+#   docker-purge --all     # Wipes EVERYTHING (containers, networks, volumes, images)
+#
+# Subcommand Setup:
+#   1. Make executable: chmod +x docker-purge
+#   2. Move to your PATH: mv docker-purge ~/.local/bin/
+#   3. Run natively: docker-purge
+
+set -euo pipefail
+
+# Ensure Docker is installed and running
+if ! command -v docker &>/dev/null || ! docker info &>/dev/null; then
+    echo "--> Error: Docker is not installed or the Docker daemon is not running." >&2
+    exit 1
+fi
+
+# Parse flags
+WIPE_VOLUMES=false
+WIPE_IMAGES=false
+
+for arg in "$@"; do
+    case $arg in
+        --all)
+            WIPE_VOLUMES=true
+            WIPE_IMAGES=true
+            ;;
+        --volumes)
+            WIPE_VOLUMES=true
+            ;;
+        --images|--all-images|--from-orbit)
+            WIPE_IMAGES=true
+            ;;
+        *)
+            echo "--> Error: Unknown option '$arg'" >&2
+            echo "Usage: docker-purge [--volumes] [--images] [--all]" >&2
+            exit 1
+            ;;
+    esac
+done
+
+echo "=== Starting Docker Environment Purge ==="
+
+# Stop all running containers
+RUNNING_CONTAINERS=$(docker ps -q)
+if [ -n "$RUNNING_CONTAINERS" ]; then
+    echo "Stopping running containers..."
+    docker stop $RUNNING_CONTAINERS
+else
+    echo "No running containers found."
+fi
+
+# Remove all containers (running or stopped)
+ALL_CONTAINERS=$(docker ps -aq)
+if [ -n "$ALL_CONTAINERS" ]; then
+    echo "Removing all containers..."
+    docker rm -f $ALL_CONTAINERS
+else
+    echo "No containers found."
+fi
+
+# Prune unused networks
+echo "Pruning unused networks..."
+docker network prune -f
+
+# Image Handling (Default to dangling, opt-in for all images)
+if [ "$WIPE_IMAGES" = true ]; then
+    echo "Wiping all Docker images..."
+    ALL_IMAGES=$(docker images -q)
+    if [ -n "$ALL_IMAGES" ]; then
+        docker rmi -f $ALL_IMAGES
+        echo "All Docker images removed."
+    else
+        echo "No images found to remove."
+    fi
+else
+    echo "Removing dangling images..."
+    docker image prune -f --filter "dangling=true"
+fi
+
+# Volume Handling (Opt-in for safety)
+if [ "$WIPE_VOLUMES" = true ]; then
+    echo "Removing all Docker volumes..."
+    VOLUMES=$(docker volume ls -q)
+    if [ -n "$VOLUMES" ]; then
+        docker volume rm $VOLUMES
+        echo "All Docker volumes removed."
+    else
+        echo "No volumes found."
+    fi
+else
+    echo "Skipping volumes (pass --volumes or --all to include)."
+fi
+
+echo "=== Docker Purge Complete! ==="
