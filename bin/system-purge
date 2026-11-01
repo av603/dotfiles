@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# purge-system-caches
+# system-purge
 #
 # Automates deep cleaning of system caches, developer tools, and user temp files
 # to reclaim disk space safely.
 #
 # Usage:
-#   sudo purge-system-caches
+#   sudo system-purge
 #
 # Description:
 #   1. System & APT: Purges unused packages, cleans apt archives, and trims systemd journal logs.
@@ -15,9 +15,9 @@
 #   5. Docker: Prunes unused containers, networks, images, and volumes.
 #
 # Subcommand Setup:
-#   1. Make executable: chmod +x purge-system-caches
-#   2. Move to your PATH: sudo mv purge-system-caches /usr/local/bin/ (or ~/.local/bin/)
-#   3. Run natively: sudo purge-system-caches
+#   1. Make executable: chmod +x system-purge
+#   2. Move to your PATH: sudo mv system-purge /usr/local/bin/ (or ~/.local/bin/)
+#   3. Run natively: sudo system-purge
 
 set -euo pipefail
 
